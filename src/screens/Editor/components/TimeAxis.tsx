@@ -27,6 +27,13 @@ export default function TimeAxis({ plotWidth, durationSeconds, font }: Props) {
   axisLine.moveTo(0, axisY);
   axisLine.lineTo(plotWidth, axisY);
 
+  function formatTime(totalSeconds: number): string {
+    if (totalSeconds === 0) return '0';
+    const m = Math.floor(totalSeconds / 60);
+    const s = Math.floor(totalSeconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
   return (
     <Group>
       <Path path={axisLine} color={tickColor} style="stroke" strokeWidth={1} />
@@ -39,7 +46,8 @@ export default function TimeAxis({ plotWidth, durationSeconds, font }: Props) {
         tick.moveTo(x, axisY);
         tick.lineTo(x, axisY - 5);
 
-        const label = `${sec}s`;
+        // const label = `${sec}s`;
+        const label = formatTime(sec);
         const labelWidth = font.measureText(label).width;
 
         return (

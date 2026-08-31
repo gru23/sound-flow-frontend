@@ -9,6 +9,7 @@ export type TrackData = {
   strokeColorL: string;
   fillColorR: string;
   strokeColorR: string;
+  leadingSilenceSeconds: number;
 };
 
 export type DerivedTrack = TrackData & {
@@ -30,6 +31,7 @@ export type TrackLayout = {
   titleY: number;
   channels: ChannelRow[];
   separatorY: number | null;
+  leadingSilencePx: number;
 };
 
 export const AXIS_GUTTER = 34;

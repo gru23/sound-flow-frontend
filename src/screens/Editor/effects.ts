@@ -6,6 +6,106 @@ export type EchoParams = {
   decay: number; // 0.1-0.9
 };
 
+export type SelectionEffect =
+  | 'echo'
+  | 'silence'
+  | 'amplify'
+  | 'normalize'
+  | 'fadeIn'
+  | 'fadeOut'
+  | 'tempo'
+  | 'reverb'
+  | 'equalizer'
+  | 'bass'
+  | 'treble';
+
+export type SelectionEffectParams = {
+  amount?: number;
+  duration?: number;
+  tempo?: number;
+  frequency?: number;
+  gain?: number;
+  width?: number;
+};
+
+function getSelectionFilter(effect: SelectionEffect, params: SelectionEffectParams, duration: number): string {
+  switch (effect) {
+    case 'amplify':
+      return `volume=${(params.amount ?? 1).toFixed(2)}`;
+    case 'normalize':
+      return `loudnorm=I=${(params.amount ?? -16).toFixed(1)}:TP=-1.5:LRA=11`;
+    case 'fadeIn':
+      return `afade=t=in:d=${Math.min(params.duration ?? 1, duration).toFixed(2)}`;
+    case 'fadeOut':
+      return `afade=t=out:st=${Math.max(0, duration - (params.duration ?? 1)).toFixed(2)}:d=${Math.min(params.duration ?? 1, duration).toFixed(2)}`;
+    case 'tempo':
+      return `atempo=${(params.tempo ?? 1).toFixed(2)}`;
+    case 'reverb':
+      return `afir=dry=10:wet=${(params.amount ?? 1).toFixed(2)}`;
+    case 'equalizer':
+      return `anequalizer=f=${Math.round(params.frequency ?? 1000)}:width_type=o:width=1:g=${(params.gain ?? 0).toFixed(1)}`;
+    case 'bass':
+      return `bass=g=${(params.gain ?? 0).toFixed(1)}:f=${Math.round(params.frequency ?? 100)}`;
+    case 'treble':
+      return `treble=g=${(params.gain ?? 0).toFixed(1)}:f=${Math.round(params.frequency ?? 3000)}`;
+    default:
+      return 'anull';
+  }
+}
+
+export async function applyEffectToSelection(
+  sourcePath: string,
+  startSeconds: number,
+  endSeconds: number,
+  totalDuration: number,
+  effect: SelectionEffect,
+  params: SelectionEffectParams = {}
+): Promise<string> {
+  const outputPath = FileSystem.documentDirectory + `edited_${Date.now()}.wav`;
+  const ffmpegInputPath = sourcePath.replace('file://', '');
+  const ffmpegOutputPath = outputPath.replace('file://', '');
+  const selectedDuration = Math.max(0.01, endSeconds - startSeconds);
+  const hasPre = startSeconds > 0.01;
+  const hasPost = endSeconds < totalDuration - 0.01;
+  const filterParts: string[] = [];
+  const segments: string[] = [];
+
+  if (hasPre) {
+    filterParts.push(`[0:a]atrim=0:${startSeconds.toFixed(3)},asetpts=PTS-STARTPTS[a0]`);
+    segments.push('[a0]');
+  }
+
+  const selectedInput = `[0:a]atrim=${startSeconds.toFixed(3)}:${endSeconds.toFixed(3)},asetpts=PTS-STARTPTS`;
+  if (effect === 'reverb') {
+    filterParts.push(`${selectedInput}[selected]`);
+    filterParts.push(`[1:a]atrim=0:1,asetpts=PTS-STARTPTS[ir]`);
+    filterParts.push(`[selected][ir]${getSelectionFilter(effect, params, selectedDuration)}[a1]`);
+  } else {
+    filterParts.push(`${selectedInput},${getSelectionFilter(effect, params, selectedDuration)}[a1]`);
+  }
+  segments.push('[a1]');
+
+  if (hasPost) {
+    filterParts.push(`[0:a]atrim=${endSeconds.toFixed(3)},asetpts=PTS-STARTPTS[a2]`);
+    segments.push('[a2]');
+  }
+
+  filterParts.push(`${segments.join('')}concat=n=${segments.length}:v=0:a=1[aout]`);
+  const filterComplex = filterParts.join(';');
+  const irInput = effect === 'reverb' ? ' -f lavfi -i "aevalsrc=exp(-6*t):s=44100:d=1"' : '';
+  const command = `-y -i "${ffmpegInputPath}"${irInput} -filter_complex "${filterComplex}" -map "[aout]" -ar 44100 "${ffmpegOutputPath}"`;
+  const session = await FFmpegKit.execute(command);
+  const returnCode = await session.getReturnCode();
+
+  if (!ReturnCode.isSuccess(returnCode)) {
+    const logs = await session.getAllLogsAsString();
+    console.error(`FFmpeg ${effect} efekat nije uspeo:`, logs);
+    throw new Error('Primena efekta nije uspela.');
+  }
+
+  return outputPath;
+}
+
 // Primenjuje echo/delay efekat SAMO na segment [startSeconds, endSeconds] zapisa,
 // dok ostatak (pre i posle selekcije) ostaje nepromenjen. Sve se odrađuje u JEDNOM
 // ffmpeg pozivu preko filter_complex grafa: isečemo do 3 segmenta (pre/selekcija/posle),

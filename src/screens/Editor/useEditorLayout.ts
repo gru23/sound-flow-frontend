@@ -78,7 +78,9 @@ export function useEditorLayout(
       cursor += TRACK_SEPARATOR_GAP;
     }
 
-    return { id: t.id, title: t.title, titleY, channels, separatorY };
+    const leadingSilencePx = maxDuration > 0 ? (t.leadingSilenceSeconds / maxDuration) * plotWidth : 0;
+
+    return { id: t.id, title: t.title, titleY, channels, separatorY, leadingSilencePx };
   });
 
   const waveformContentHeight = cursor;

@@ -212,5 +212,20 @@ export function usePlayback() {
     await setTrackVolume(id, uri, muted ? 0 : 1);
   }, [setTrackVolume]);
 
-  return { togglePlayback, isPlaying, toggleAll, stopAll, seekAll, isPlayingAll, positionSeconds, setTrackMuted, setTrackVolume };
+  const unloadTrack = useCallback(async (id: string) => {
+    const sound = soundsRef.current.get(id);
+    if (sound) {
+      await sound.unloadAsync().catch(() => {});
+      soundsRef.current.delete(id);
+    }
+    volumeByIdRef.current.delete(id);
+    setPlayingIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  return { togglePlayback, isPlaying, toggleAll, stopAll, seekAll, isPlayingAll, positionSeconds, setTrackMuted, setTrackVolume, unloadTrack };
 }
