@@ -42,6 +42,16 @@ const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 const SELECTION_HANDLE_WIDTH = 18;
 const SELECTION_HANDLE_HIT_SLOP = 22;
+const GRAPHIC_EQ_BANDS = [
+  { frequency: 125, label: '125 Hz' },
+  { frequency: 250, label: '250 Hz' },
+  { frequency: 500, label: '500 Hz' },
+  { frequency: 1000, label: '1 kHz' },
+  { frequency: 2000, label: '2 kHz' },
+  { frequency: 4000, label: '4 kHz' },
+  { frequency: 8000, label: '8 kHz' },
+  { frequency: 16000, label: '16 kHz' },
+] as const;
 
 export default function EditorScreen() {
   const route = useRoute<EditorRouteProp>();
@@ -57,6 +67,7 @@ export default function EditorScreen() {
   const [selectionStartTime, setSelectionStartTime] = useState<number | null>(null);
   const [selectionEndTime, setSelectionEndTime] = useState<number | null>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const [isLoopEnabled, setIsLoopEnabled] = useState(false);
   const [trackVolumes, setTrackVolumes] = useState<Record<string, number>>({});
   const [lastNonZeroVolumes, setLastNonZeroVolumes] = useState<Record<string, number>>({});
 
@@ -74,9 +85,20 @@ export default function EditorScreen() {
   const [effectTargetLufs, setEffectTargetLufs] = useState(-16);
   const [effectDuration, setEffectDuration] = useState(1);
   const [effectTempo, setEffectTempo] = useState(1);
+  const [effectPitch, setEffectPitch] = useState(0);
+  const [equalizerGains, setEqualizerGains] = useState<number[]>(() =>
+    GRAPHIC_EQ_BANDS.map(() => 0)
+  );
   const [effectFrequency, setEffectFrequency] = useState(1000);
   const [effectGain, setEffectGain] = useState(0);
   const [isApplyingEffect, setIsApplyingEffect] = useState(false);
+
+  const [effectPhaserDepth, setEffectPhaserDepth] = useState(2);
+  const [effectPhaserDecay, setEffectPhaserDecay] = useState(0.4);
+  const [effectPhaserSpeed, setEffectPhaserSpeed] = useState(0.5);
+  const [effectPhaserDelay, setEffectPhaserDelay] = useState(2);
+  const [effectDistortionDrive, setEffectDistortionDrive] = useState(2);
+
 
 
   const waveformTouchRef = useRef<{ x: number; y: number; time: number; moved: boolean } | null>(null);
@@ -103,7 +125,7 @@ export default function EditorScreen() {
     useEditorLayout(tracks, screenWidth, screenHeight, zoomFactor);
   const minVisualZoom = maxDuration > 0 ? Math.max(MIN_ZOOM, (baseCanvasWidth - AXIS_GUTTER - 2) / (maxDuration * 70)) : MIN_ZOOM;
 
-  const { toggleAll, stopAll, seekAll, isPlayingAll, positionSeconds, setTrackVolume, unloadTrack } = usePlayback();
+  const { toggleAll, stopAll, seekAll, setLoopRange, isPlayingAll, positionSeconds, setTrackVolume, unloadTrack } = usePlayback();
 
   const handleToggleAll = () => {
     const playableTracks = tracks.map((t) => ({ id: t.id, uri: t.path }));
@@ -197,6 +219,7 @@ export default function EditorScreen() {
           end: Math.max(selectionStartTime, selectionEndTime),
         }
       : null;
+  const canLoop = normalizedSelection !== null && normalizedSelection.end - normalizedSelection.start > 0.05;
 
   const selectedTrackLayout = selectedTrackId
     ? trackLayouts.find((layout) => layout.id === selectedTrackId) ?? null
@@ -227,6 +250,7 @@ export default function EditorScreen() {
       } else {
         setSelectionStartTime(null);
         setSelectionEndTime(null);
+        setIsLoopEnabled(false);
         selectionGestureRef.current = null;
       }
       return next;
@@ -241,10 +265,16 @@ export default function EditorScreen() {
     });
   };
 
+  const handleLoopToggle = () => {
+    if (!canLoop) return;
+    setIsLoopEnabled((current) => !current);
+  };
+
   const clearSelection = () => {
     setSelectionStartTime(null);
     setSelectionEndTime(null);
     setSelectedTrackId(null);
+    setIsLoopEnabled(false);
     selectionGestureRef.current = null;
   };
 
@@ -507,46 +537,107 @@ export default function EditorScreen() {
 
   const handleApplyEffect = async () => {
     if (!selectedTrackId || !normalizedSelection) return;
+
     const track = tracks.find((t) => t.id === selectedTrackId);
     if (!track) return;
 
     setIsApplyingEffect(true);
+
     try {
       const newPath =
         effectType === 'echo'
-          ? await applyEchoToSelection(track.path, normalizedSelection.start, normalizedSelection.end, track.duration, {
-              delayMs: effectDelayMs,
-              decay: effectDecay,
-            })
+          ? await applyEchoToSelection(
+              track.path,
+              normalizedSelection.start,
+              normalizedSelection.end,
+              track.duration,
+              {
+                delayMs: effectDelayMs,
+                decay: effectDecay,
+              }
+            )
           : effectType === 'silence'
-            ? await applySilenceToSelection(track.path, normalizedSelection.start, normalizedSelection.end)
-            : await applyEffectToSelection(track.path, normalizedSelection.start, normalizedSelection.end, track.duration, effectType, {
-                amount: effectType === 'normalize' ? effectTargetLufs : effectAmount,
-                duration: effectDuration,
-                tempo: effectTempo,
-                frequency: effectFrequency,
-                gain: effectGain,
-              });
+            ? await applySilenceToSelection(
+                track.path,
+                normalizedSelection.start,
+                normalizedSelection.end
+              )
+            : await applyEffectToSelection(
+                track.path,
+                normalizedSelection.start,
+                normalizedSelection.end,
+                track.duration,
+                effectType,
+                {
+                  // Opšti efekti
+                  amount:
+                    effectType === 'normalize'
+                      ? effectTargetLufs
+                      : effectAmount,
 
+                  duration: effectDuration,
+                  tempo: effectTempo,
+                  pitch: effectPitch,
+                  frequency: effectFrequency,
+                  gain: effectGain,
 
-      // Ponovo izvlačimo waveform/trajanje iz IZMENJENOG fajla - isti kod
-      // koji se koristi i pri prvom uvozu pesme.
-      const refreshed = await extractTrackData(newPath, `${track.title}.wav`);
-      // Playback kešira Audio.Sound po ID-u, pa ga moramo osloboditi nakon
-      // promjene putanje da bi sljedeća reprodukcija učitala novi fajl.
+                  // Graphic EQ
+                  equalizerBands: GRAPHIC_EQ_BANDS.map(
+                    (band, index) => ({
+                      frequency: band.frequency,
+                      gain: equalizerGains[index] ?? 0,
+                    })
+                  ),
+
+                  // Phaser
+                  phaserDepth: effectPhaserDepth,
+                  phaserDecay: effectPhaserDecay,
+                  phaserSpeed: effectPhaserSpeed,
+                  phaserDelay: effectPhaserDelay,
+
+                  // Distortion
+                  distortionDrive: effectDistortionDrive,
+                }
+              );
+
+      // Ponovo izvlačimo waveform/trajanje iz izmijenjenog fajla.
+      const refreshed = await extractTrackData(
+        newPath,
+        `${track.title}.wav`
+      );
+
+      // Playback kešira Audio.Sound po ID-u,
+      // pa ga moramo osloboditi nakon promjene putanje.
       await unloadTrack(track.id);
+
       setTracks((prev) =>
-        prev.map((t) => (t.id === track.id ? { ...t, ...refreshed, id: track.id } : t))
+        prev.map((t) =>
+          t.id === track.id
+            ? {
+                ...t,
+                ...refreshed,
+                id: track.id,
+              }
+            : t
+        )
       );
 
       clearSelection();
     } catch (err) {
-      console.error('Greška pri primjeni efekta:', err);
-      Alert.alert('Greška', 'Nije uspjela primjena efekta.');
+      console.error(
+        `Greška pri primjeni efekta (${effectType}):`,
+        err
+      );
+
+      Alert.alert(
+        'Greška',
+        'Nije uspjela primjena efekta.'
+      );
     } finally {
       setIsApplyingEffect(false);
     }
   };
+
 
   // Refs za sinhronizaciju fiksnog header-a (vremenska osa) sa horizontalnim
   // scroll-om glavnog sadržaja, i za auto-scroll koji prati playhead.
@@ -599,6 +690,10 @@ export default function EditorScreen() {
       headerScrollRef.current?.scrollTo({ x: nextScrollX, animated: false });
     }
   }, [canvasWidth]);
+
+  useEffect(() => {
+    setLoopRange(isLoopEnabled && canLoop ? normalizedSelection : null);
+  }, [isLoopEnabled, canLoop, normalizedSelection?.start, normalizedSelection?.end, setLoopRange]);
 
   useEffect(() => {
     if (!isSelectionMode) {
@@ -682,6 +777,39 @@ export default function EditorScreen() {
     </View>
   );
 
+  const renderGraphicEq = () => (
+    <View style={styles.graphicEqRow}>
+      {GRAPHIC_EQ_BANDS.map((band, index) => (
+        <View key={band.frequency} style={styles.graphicEqBand}>
+          <Text style={styles.graphicEqGain}>
+            {(equalizerGains[index] ?? 0).toFixed(1)} dB
+          </Text>
+          <View style={styles.graphicEqSliderSlot}>
+            <Slider
+              style={styles.graphicEqSlider}
+              minimumValue={-12}
+              maximumValue={12}
+              step={0.5}
+              value={equalizerGains[index] ?? 0}
+              onValueChange={(value) => {
+                setEqualizerGains((current) => {
+                  const next = [...current];
+                  next[index] = value;
+                  return next;
+                });
+              }}
+              minimumTrackTintColor="#1561bd"
+              maximumTrackTintColor="#c7cfdb"
+              thumbTintColor="#1561bd"
+              accessibilityLabel={`${band.label} gain`}
+            />
+          </View>
+          <Text style={styles.graphicEqFrequency}>{band.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+
 
   useEffect(() => {
     if (initialPath) {
@@ -710,403 +838,980 @@ export default function EditorScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* FIKSNA vremenska osa - van vertikalnog ScrollView-a, ostaje na vrhu
-          i kad se skroluje na dole. Horizontalno je scrollEnabled=false -
-          pomera se programski, u sinhronizaciji sa glavnim sadržajem. */}
+  <SafeAreaView style={styles.container}>
+    <View style={styles.topControls}>
+      <TouchableOpacity
+        style={styles.addTrackButton}
+        onPress={pickAndAddTrack}
+        disabled={isAddingTrack}
+        accessibilityRole="button"
+        accessibilityLabel="Dodaj pjesmu"
+      >
+        {isAddingTrack ? (
+          <ActivityIndicator size="small" color="#1561bd" />
+        ) : (
+          <MaterialIcons name="add" size={25} color="#1561bd" />
+        )}
+      </TouchableOpacity>
+
       <View style={styles.timeDisplayContainer}>
         <Text style={styles.timeDisplay}>
-          {formatTime(positionSeconds)} / {formatTime(maxDuration)}
+          {formatTime(positionSeconds)}
+          <Text style={styles.timeSeparator}> / </Text>
+          {formatTime(maxDuration)}
         </Text>
+
         <View style={styles.zoomControls}>
           <TouchableOpacity
-            style={[styles.zoomButton, zoomFactor <= minVisualZoom && styles.zoomButtonDisabled]}
+            style={styles.zoomIconButton}
             onPress={handleZoomOut}
             disabled={zoomFactor <= minVisualZoom}
             accessibilityRole="button"
             accessibilityLabel="Umanji prikaz"
           >
-            <MaterialIcons name="remove" size={22} color="#ffffff" />
+            <MaterialIcons
+              name="zoom-out"
+              size={22}
+              color={
+                zoomFactor <= minVisualZoom
+                  ? '#b8c0cc'
+                  : '#475569'
+              }
+            />
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={[styles.zoomButton, zoomFactor >= MAX_ZOOM && styles.zoomButtonDisabled]}
+            style={styles.zoomIconButton}
             onPress={handleZoomIn}
             disabled={zoomFactor >= MAX_ZOOM}
             accessibilityRole="button"
             accessibilityLabel="Uvećaj prikaz"
           >
-            <MaterialIcons name="add" size={22} color="#ffffff" />
+            <MaterialIcons
+              name="zoom-in"
+              size={22}
+              color={
+                zoomFactor >= MAX_ZOOM
+                  ? '#b8c0cc'
+                  : '#475569'
+              }
+            />
           </TouchableOpacity>
         </View>
       </View>
+    </View>
 
+    <View style={{ flexDirection: 'row' }}>
+      <View
+        style={{
+          width: AXIS_GUTTER,
+          height: TIME_AXIS_AREA,
+        }}
+      />
 
-      <View style={{ flexDirection: 'row' }}>
-        <View style={{ width: AXIS_GUTTER, height: TIME_AXIS_AREA }} />
-        <ScrollView
-          ref={headerScrollRef}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          scrollEnabled={false}
-          bounces={false}
+      <ScrollView
+        ref={headerScrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        scrollEnabled={false}
+        bounces={false}
+      >
+        <Canvas
+          style={{
+            width: canvasWidth - AXIS_GUTTER,
+            height: TIME_AXIS_AREA,
+          }}
         >
-          <Canvas style={{ width: canvasWidth - AXIS_GUTTER, height: TIME_AXIS_AREA }}>
-            <TimeAxis plotWidth={plotWidth} durationSeconds={maxDuration} font={font} />
+          <TimeAxis
+            plotWidth={plotWidth}
+            durationSeconds={maxDuration}
+            font={font}
+          />
+        </Canvas>
+      </ScrollView>
+    </View>
+
+    <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      <View style={styles.waveformStage}>
+        <View
+          style={{
+            flexDirection: 'row',
+            position: 'relative',
+          }}
+        >
+          <Canvas
+            style={{
+              width: AXIS_GUTTER,
+              height: canvasHeight,
+            }}
+          >
+            <AmplitudeAxis
+              trackLayouts={trackLayouts}
+              channelHeight={channelHeight}
+              font={font}
+            />
           </Canvas>
-        </ScrollView>
-      </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <View style={styles.waveformStage}>
-          <View style={{ flexDirection: 'row', position: 'relative' }}>
-            <Canvas style={{ width: AXIS_GUTTER, height: canvasHeight }}>
-              <AmplitudeAxis trackLayouts={trackLayouts} channelHeight={channelHeight} font={font} />
-            </Canvas>
-
-            <ScrollView
-              ref={contentScrollRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              scrollEnabled={!isSelectionMode && !isMoveMode}
-              bounces={false}
-              onScroll={handleContentScroll}
-              scrollEventThrottle={16}
-              onLayout={handleViewportLayout}
-              onTouchStart={handleWaveformTouchStart}
-              onTouchMove={handleWaveformTouchMove}
-              onTouchEnd={handleWaveformTouchEnd}
+          <ScrollView
+            ref={contentScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={!isSelectionMode && !isMoveMode}
+            bounces={false}
+            onScroll={handleContentScroll}
+            scrollEventThrottle={16}
+            onLayout={handleViewportLayout}
+            onTouchStart={handleWaveformTouchStart}
+            onTouchMove={handleWaveformTouchMove}
+            onTouchEnd={handleWaveformTouchEnd}
+          >
+            <View
+              style={{
+                width: canvasWidth - AXIS_GUTTER,
+                height: canvasHeight,
+                position: 'relative',
+              }}
             >
-              <View style={{ width: canvasWidth - AXIS_GUTTER, height: canvasHeight, position: 'relative' }}>
-                <Canvas style={{ width: canvasWidth - AXIS_GUTTER, height: canvasHeight }}>
-                  <Group clip={plotClipRect}>
-                    {trackLayouts.map((layout, idx) => {
-                      const isMovingThis = movingTrackId === layout.id;
-                      const previewPx = isMovingThis && maxDuration > 0 ? movePreviewDeltaSeconds * (plotWidth / maxDuration) : 0;
-                      return (
-                        <Track
-                          key={layout.id}
-                          layout={layout}
-                          plotWidth={plotWidth}
-                          channelHeight={channelHeight}
-                          isLast={idx === trackLayouts.length - 1}
-                          isSelected={layout.id === selectedTrackId}
-                          extraTranslateXPx={previewPx}
-                        />
-                      );
-                    })}
-                  </Group>
+              <Canvas
+                style={{
+                  width: canvasWidth - AXIS_GUTTER,
+                  height: canvasHeight,
+                }}
+              >
+                <Group clip={plotClipRect}>
+                  {trackLayouts.map((layout, idx) => {
+                    const isMovingThis =
+                      movingTrackId === layout.id;
 
-                  <Playhead
-                    positionSeconds={positionSeconds}
-                    maxDurationSeconds={maxDuration}
-                    plotWidth={plotWidth}
-                    canvasHeight={canvasHeight}
-                  />
-                </Canvas>
+                    const previewPx =
+                      isMovingThis && maxDuration > 0
+                        ? movePreviewDeltaSeconds *
+                          (plotWidth / maxDuration)
+                        : 0;
 
-                {normalizedSelection && maxDuration > 0 && selectedTrackLayout && (
+                    return (
+                      <Track
+                        key={layout.id}
+                        layout={layout}
+                        plotWidth={plotWidth}
+                        channelHeight={channelHeight}
+                        isLast={
+                          idx === trackLayouts.length - 1
+                        }
+                        isSelected={
+                          layout.id === selectedTrackId
+                        }
+                        extraTranslateXPx={previewPx}
+                      />
+                    );
+                  })}
+                </Group>
+
+                <Playhead
+                  positionSeconds={positionSeconds}
+                  maxDurationSeconds={maxDuration}
+                  plotWidth={plotWidth}
+                  canvasHeight={canvasHeight}
+                />
+              </Canvas>
+
+              {normalizedSelection &&
+                maxDuration > 0 &&
+                selectedTrackLayout && (
                   <View
                     pointerEvents="none"
                     style={[
                       styles.selectionHighlight,
                       {
-                        left: timeToX(normalizedSelection.start),
-                        width: Math.max(1, timeToX(normalizedSelection.end) - timeToX(normalizedSelection.start)),
-                        top: getTrackSelectionBounds(selectedTrackLayout).top,
-                        height: getTrackSelectionBounds(selectedTrackLayout).height,
+                        left: timeToX(
+                          normalizedSelection.start
+                        ),
+                        width: Math.max(
+                          1,
+                          timeToX(
+                            normalizedSelection.end
+                          ) -
+                            timeToX(
+                              normalizedSelection.start
+                            )
+                        ),
+                        top: getTrackSelectionBounds(
+                          selectedTrackLayout
+                        ).top,
+                        height: getTrackSelectionBounds(
+                          selectedTrackLayout
+                        ).height,
                       },
                     ]}
                   />
                 )}
 
-                {normalizedSelection && maxDuration > 0 && isSelectionMode && selectedTrackLayout && (
+              {normalizedSelection &&
+                maxDuration > 0 &&
+                isSelectionMode &&
+                selectedTrackLayout && (
                   <>
                     <View
                       pointerEvents="none"
                       style={[
                         styles.selectionHandle,
                         {
-                          left: timeToX(normalizedSelection.start) - SELECTION_HANDLE_WIDTH / 2,
-                          top: getTrackSelectionBounds(selectedTrackLayout).top,
-                          height: getTrackSelectionBounds(selectedTrackLayout).height,
+                          left:
+                            timeToX(
+                              normalizedSelection.start
+                            ) -
+                            SELECTION_HANDLE_WIDTH / 2,
+                          top: getTrackSelectionBounds(
+                            selectedTrackLayout
+                          ).top,
+                          height: getTrackSelectionBounds(
+                            selectedTrackLayout
+                          ).height,
                         },
                       ]}
                     >
-                      <View style={styles.selectionHandleGrip} />
+                      <View
+                        style={styles.selectionHandleGrip}
+                      />
                     </View>
+
                     <View
                       pointerEvents="none"
                       style={[
                         styles.selectionHandle,
                         {
-                          left: timeToX(normalizedSelection.end) - SELECTION_HANDLE_WIDTH / 2,
-                          top: getTrackSelectionBounds(selectedTrackLayout).top,
-                          height: getTrackSelectionBounds(selectedTrackLayout).height,
+                          left:
+                            timeToX(
+                              normalizedSelection.end
+                            ) -
+                            SELECTION_HANDLE_WIDTH / 2,
+                          top: getTrackSelectionBounds(
+                            selectedTrackLayout
+                          ).top,
+                          height: getTrackSelectionBounds(
+                            selectedTrackLayout
+                          ).height,
                         },
                       ]}
                     >
-                      <View style={styles.selectionHandleGrip} />
+                      <View
+                        style={styles.selectionHandleGrip}
+                      />
                     </View>
                   </>
                 )}
 
-                {isSelectionMode && maxDuration > 0 && (
+              {isSelectionMode &&
+                maxDuration > 0 && (
                   <View
                     style={styles.selectionGestureLayer}
                     onStartShouldSetResponder={() => true}
                     onMoveShouldSetResponder={() => true}
-                    onResponderGrant={handleSelectionLayerStart}
-                    onResponderMove={handleSelectionLayerMove}
-                    onResponderRelease={handleSelectionLayerEnd}
-                    onResponderTerminate={handleSelectionLayerEnd}
+                    onResponderGrant={
+                      handleSelectionLayerStart
+                    }
+                    onResponderMove={
+                      handleSelectionLayerMove
+                    }
+                    onResponderRelease={
+                      handleSelectionLayerEnd
+                    }
+                    onResponderTerminate={
+                      handleSelectionLayerEnd
+                    }
                   />
                 )}
 
-                {isMoveMode && maxDuration > 0 && (
-                  <View
-                    style={styles.selectionGestureLayer}
-                    onStartShouldSetResponder={() => true}
-                    onMoveShouldSetResponder={() => true}
-                    onResponderGrant={handleMoveLayerStart}
-                    onResponderMove={handleMoveLayerMove}
-                    onResponderRelease={handleMoveLayerEnd}
-                    onResponderTerminate={handleMoveLayerEnd}
-                  />
-                )}
-              </View>
-            </ScrollView>
+              {isMoveMode && maxDuration > 0 && (
+                <View
+                  style={styles.selectionGestureLayer}
+                  onStartShouldSetResponder={() => true}
+                  onMoveShouldSetResponder={() => true}
+                  onResponderGrant={handleMoveLayerStart}
+                  onResponderMove={handleMoveLayerMove}
+                  onResponderRelease={handleMoveLayerEnd}
+                  onResponderTerminate={handleMoveLayerEnd}
+                />
+              )}
+            </View>
+          </ScrollView>
 
-            <TrackTitles
-              trackLayouts={trackLayouts}
-              canvasHeight={canvasHeight}
-              isMuted={isMuted}
-              onToggleMute={handleToggleMute}
-              trackVolume={getTrackVolume}
-              onVolumeChange={handleVolumeChange}
-              onDeleteTrack={handleDeleteTrack}
-            />
-          </View>
+          <TrackTitles
+            trackLayouts={trackLayouts}
+            canvasHeight={canvasHeight}
+            isMuted={isMuted}
+            onToggleMute={handleToggleMute}
+            trackVolume={getTrackVolume}
+            onVolumeChange={handleVolumeChange}
+            onDeleteTrack={handleDeleteTrack}
+          />
         </View>
+      </View>
 
-        <Text style={styles.meta}>Trajanje: {maxDuration.toFixed(2)} s</Text>
-        <Text style={styles.meta} numberOfLines={2}>Putanja: {initialPath ?? '-'}</Text>
-
-        <View style={styles.modeControls}>
+      <View style={styles.editorToolbar}>
+        <View style={styles.editTools}>
           <TouchableOpacity
-            style={[styles.modeButton, isSelectionMode && styles.modeButtonActive]}
+            style={[
+              styles.toolButton,
+              isSelectionMode &&
+                styles.toolButtonActive,
+            ]}
             onPress={handleSelectionToggle}
             disabled={tracks.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isSelectionMode
+                ? 'Onemogući selekciju'
+                : 'Omogući selekciju'
+            }
           >
-            <Text style={styles.modeButtonText}>{isSelectionMode ? 'Select ON' : 'Select OFF'}</Text>
+            <MaterialIcons
+              name="select-all"
+              size={20}
+              color={
+                isSelectionMode
+                  ? '#1561bd'
+                  : '#526174'
+              }
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.modeButton, isMoveMode && styles.modeButtonActive]}
+            style={[
+              styles.toolButton,
+              isMoveMode &&
+                styles.toolButtonActive,
+            ]}
             onPress={handleMoveToggle}
-            disabled={tracks.length === 0 || isApplyingMove}
+            disabled={
+              tracks.length === 0 ||
+              isApplyingMove
+            }
+            accessibilityRole="button"
+            accessibilityLabel={
+              isMoveMode
+                ? 'Onemogući pomjeranje'
+                : 'Omogući pomjeranje'
+            }
           >
-            <MaterialIcons name="pan-tool" size={18} color="#ffffff" />
+            <MaterialIcons
+              name="pan-tool"
+              size={19}
+              color={
+                isMoveMode
+                  ? '#1561bd'
+                  : '#526174'
+              }
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.modeButton, styles.splitButton]}
+            style={[
+              styles.toolButton,
+              !canSplit &&
+                styles.toolButtonDisabled,
+            ]}
             onPress={handleSplit}
-            disabled={!canSplit || isApplyingSplit}
+            disabled={
+              !canSplit ||
+              isApplyingSplit
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Podijeli"
           >
             {isApplyingSplit ? (
-              <ActivityIndicator size="small" color="#ffffff" />
+              <ActivityIndicator
+                size="small"
+                color="#64748b"
+              />
             ) : (
-              <Text style={styles.modeButtonText}>✂ Split</Text>
+              <MaterialIcons
+                name="content-cut"
+                size={20}
+                color={
+                  canSplit
+                    ? '#526174'
+                    : '#b7c0cc'
+                }
+              />
             )}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.modeButton, styles.effectOpenButton]}
-            onPress={() => setShowEffectPanel(true)}
-            disabled={!normalizedSelection || isApplyingEffect}
+            style={[
+              styles.toolButton,
+              (!normalizedSelection ||
+                isApplyingEffect) &&
+                styles.toolButtonDisabled,
+            ]}
+            onPress={() =>
+              setShowEffectPanel(true)
+            }
+            disabled={
+              !normalizedSelection ||
+              isApplyingEffect
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Efekti"
           >
-            <MaterialIcons name="auto-fix-high" size={18} color="#ffffff" />
-            <Text style={styles.modeButtonText}>Efekti</Text>
+            <MaterialIcons
+              name="auto-fix-high"
+              size={20}
+              color={
+                normalizedSelection &&
+                !isApplyingEffect
+                  ? '#7c3aed'
+                  : '#b7c0cc'
+              }
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.toolButton,
+              isLoopEnabled &&
+                styles.toolButtonActive,
+            ]}
+            onPress={handleLoopToggle}
+            disabled={!canLoop}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isLoopEnabled
+                ? 'Onemogući petlju'
+                : 'Omogući petlju'
+            }
+          >
+            <MaterialIcons
+              name="repeat"
+              size={20}
+              color={
+                isLoopEnabled
+                  ? '#1561bd'
+                  : canLoop
+                    ? '#526174'
+                    : '#b7c0cc'
+              }
+            />
           </TouchableOpacity>
         </View>
 
-        {showEffectPanel && normalizedSelection && (
+        <View style={styles.toolDivider} />
+
+        <View style={styles.transportControls}>
+          <TouchableOpacity
+            style={[
+              styles.transportButton,
+              styles.playButton,
+            ]}
+            onPress={handleToggleAll}
+            disabled={tracks.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isPlayingAll
+                ? 'Pauziraj sve'
+                : 'Pokreni sve'
+            }
+          >
+            <MaterialIcons
+              name={
+                isPlayingAll
+                  ? 'pause'
+                  : 'play-arrow'
+              }
+              size={27}
+              color="#ffffff"
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.transportButton,
+              styles.stopButton,
+            ]}
+            onPress={handleStopAll}
+            disabled={tracks.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Stopiraj sve"
+          >
+            <MaterialIcons
+              name="stop"
+              size={23}
+              color={
+                tracks.length === 0
+                  ? '#94a3b8'
+                  : '#475569'
+              }
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {showEffectPanel &&
+        normalizedSelection && (
           <View style={styles.effectPanel}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.effectTypeRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={
+                styles.effectTypeRow
+              }
+            >
               <TouchableOpacity
-                style={[styles.effectTypeButton, effectType === 'echo' && styles.effectTypeButtonActive]}
-                onPress={() => setEffectType('echo')}
+                style={[
+                  styles.effectTypeButton,
+                  effectType === 'echo' &&
+                    styles.effectTypeButtonActive,
+                ]}
+                onPress={() =>
+                  setEffectType('echo')
+                }
               >
-                <Text style={styles.effectTypeButtonText}>Echo / Delay</Text>
+                <Text
+                  style={
+                    styles.effectTypeButtonText
+                  }
+                >
+                  Echo / Delay
+                </Text>
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={[styles.effectTypeButton, effectType === 'silence' && styles.effectTypeButtonActive]}
-                onPress={() => setEffectType('silence')}
+                style={[
+                  styles.effectTypeButton,
+                  effectType === 'silence' &&
+                    styles.effectTypeButtonActive,
+                ]}
+                onPress={() =>
+                  setEffectType('silence')
+                }
               >
-                <Text style={styles.effectTypeButtonText}>Silence</Text>
+                <Text
+                  style={
+                    styles.effectTypeButtonText
+                  }
+                >
+                  Silence
+                </Text>
               </TouchableOpacity>
-              {([
-                ['amplify', 'Amplify'],
-                ['normalize', 'Normalize'],
-                ['fadeIn', 'Fade In'],
-                ['fadeOut', 'Fade Out'],
-                ['tempo', 'Change Tempo'],
-                ['reverb', 'Reverb'],
-                ['equalizer', 'Graphic EQ'],
-                ['bass', 'Bass'],
-                ['treble', 'Treble'],
-              ] as [SelectionEffect, string][]).map(([key, label]) => (
+
+              {(
+                [
+                  ['amplify', 'Amplify'],
+                  ['normalize', 'Normalize'],
+                  ['fadeIn', 'Fade In'],
+                  ['fadeOut', 'Fade Out'],
+                  ['tempo', 'Change Tempo'],
+                  ['pitch', 'Pitch'],
+                  ['reverb', 'Reverb'],
+                  ['equalizer', 'Graphic EQ'],
+                  ['bass', 'Bass'],
+                  ['treble', 'Treble'],
+                  ['phaser', 'Phaser'],
+                  ['distortion', 'Distortion'],
+                ] as [SelectionEffect, string][]
+              ).map(([key, label]) => (
                 <TouchableOpacity
                   key={key}
-                  style={[styles.effectTypeButton, effectType === key && styles.effectTypeButtonActive]}
-                  onPress={() => setEffectType(key)}
+                  style={[
+                    styles.effectTypeButton,
+                    effectType === key &&
+                      styles.effectTypeButtonActive,
+                  ]}
+                  onPress={() =>
+                    setEffectType(key)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={label}
                 >
-                  <Text style={styles.effectTypeButtonText}>{label}</Text>
+                  <Text
+                    style={
+                      styles.effectTypeButtonText
+                    }
+                  >
+                    {key === 'pitch' ? 'Change Pitch' : label}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
             {effectType === 'echo' && (
               <>
-                {renderEffectSlider('Kašnjenje', effectDelayMs, 50, 1000, 10, setEffectDelayMs, ' ms')}
-                {renderEffectSlider('Slabljenje odjeka', effectDecay, 0.1, 0.9, 0.05, setEffectDecay)}
+                {renderEffectSlider(
+                  'Delay',
+                  effectDelayMs,
+                  50,
+                  1000,
+                  10,
+                  setEffectDelayMs,
+                  ' ms'
+                )}
+
+                {renderEffectSlider(
+                  'Echo Decay',
+                  effectDecay,
+                  0.1,
+                  0.9,
+                  0.05,
+                  setEffectDecay
+                )}
               </>
             )}
 
-            {effectType === 'amplify' && renderEffectSlider('Pojačanje', effectAmount, 0.5, 3, 0.1, setEffectAmount, 'x')}
-            {effectType === 'normalize' && renderEffectSlider('Ciljna glasnoća', effectTargetLufs, -30, -5, 1, setEffectTargetLufs, ' LUFS')}
-            {(effectType === 'fadeIn' || effectType === 'fadeOut') && renderEffectSlider('Trajanje fade-a', effectDuration, 0.1, 10, 0.1, setEffectDuration, ' s')}
-            {effectType === 'tempo' && renderEffectSlider('Brzina', effectTempo, 0.5, 2, 0.05, setEffectTempo, 'x')}
-            {effectType === 'reverb' && renderEffectSlider('Jačina reverba', effectAmount, 0.1, 3, 0.1, setEffectAmount, 'x')}
+            {effectType === 'amplify' &&
+              renderEffectSlider(
+                'Gain',
+                effectAmount,
+                0.5,
+                3,
+                0.1,
+                setEffectAmount,
+                'x'
+              )}
+
+            {effectType === 'normalize' &&
+              renderEffectSlider(
+                'Loudness',
+                effectTargetLufs,
+                -30,
+                -5,
+                1,
+                setEffectTargetLufs,
+                ' LUFS'
+              )}
+
+            {(effectType === 'fadeIn' ||
+              effectType === 'fadeOut') &&
+              renderEffectSlider(
+                'Fade Duration',
+                effectDuration,
+                0.1,
+                10,
+                0.1,
+                setEffectDuration,
+                ' s'
+              )}
+
+            {effectType === 'tempo' &&
+              renderEffectSlider(
+                'Speed',
+                effectTempo,
+                0.5,
+                2,
+                0.05,
+                setEffectTempo,
+                'x'
+              )}
+            {effectType === 'pitch' &&
+              renderEffectSlider(
+                'Pitch',
+                effectPitch,
+                -12,
+                12,
+                1,
+                setEffectPitch,
+                ' st'
+              )}
+
+            {effectType === 'reverb' &&
+              renderEffectSlider(
+                'Reverb Amount',
+                effectAmount,
+                0.1,
+                3,
+                0.1,
+                setEffectAmount,
+                'x'
+              )}
+
             {effectType === 'equalizer' && (
+              renderGraphicEq()
+            )}
+
+            {(effectType === 'bass' ||
+              effectType === 'treble') && (
               <>
-                {renderEffectSlider('Frekvencija', effectFrequency, 80, 12000, 10, setEffectFrequency, ' Hz')}
-                {renderEffectSlider('Gain', effectGain, -12, 12, 0.5, setEffectGain, ' dB')}
+                {renderEffectSlider(
+                  'Gain',
+                  effectGain,
+                  -12,
+                  12,
+                  0.5,
+                  setEffectGain,
+                  ' dB'
+                )}
+
+                {renderEffectSlider(
+                  'Frequency',
+                  effectFrequency,
+                  20,
+                  12000,
+                  10,
+                  setEffectFrequency,
+                  ' Hz'
+                )}
               </>
             )}
-            {(effectType === 'bass' || effectType === 'treble') && (
+
+            {effectType === 'phaser' && (
               <>
-                {renderEffectSlider('Gain', effectGain, -12, 12, 0.5, setEffectGain, ' dB')}
-                {renderEffectSlider('Frekvencija', effectFrequency, 20, 12000, 10, setEffectFrequency, ' Hz')}
+                {renderEffectSlider(
+                  'Depth',
+                  effectPhaserDepth,
+                  0.1,
+                  10,
+                  0.1,
+                  setEffectPhaserDepth
+                )}
+
+                {renderEffectSlider(
+                  'Decay',
+                  effectPhaserDecay,
+                  0,
+                  0.9,
+                  0.05,
+                  setEffectPhaserDecay
+                )}
+
+                {renderEffectSlider(
+                  'Speed',
+                  effectPhaserSpeed,
+                  0.1,
+                  5,
+                  0.1,
+                  setEffectPhaserSpeed,
+                  ' Hz'
+                )}
+
+                {renderEffectSlider(
+                  'Delay',
+                  effectPhaserDelay,
+                  0.1,
+                  10,
+                  0.1,
+                  setEffectPhaserDelay,
+                  ' ms'
+                )}
               </>
             )}
+
+            {effectType === 'distortion' &&
+              renderEffectSlider(
+                'Drive',
+                effectDistortionDrive,
+                1,
+                10,
+                0.1,
+                setEffectDistortionDrive,
+                'x'
+              )}
 
             {effectType === 'silence' && (
-              <Text style={styles.effectSilenceNote}>
-                Selektovani dio signala biće potpuno utišan (ravna linija, nulti signal).
+              <Text
+                style={
+                  styles.effectSilenceNote
+                }
+              >
+                The selected part of the audio will be completely muted (flat line, zero signal).
               </Text>
             )}
 
             <View style={styles.effectButtonsRow}>
               <TouchableOpacity
-                style={[styles.modeButton, styles.effectCancelButton]}
-                onPress={() => setShowEffectPanel(false)}
+                style={[
+                  styles.effectActionButton,
+                  styles.effectCancelButton,
+                ]}
+                onPress={() =>
+                  setShowEffectPanel(false)
+                }
                 disabled={isApplyingEffect}
               >
-                <Text style={styles.modeButtonText}>Otkaži</Text>
+                <Text
+                  style={
+                    styles.effectActionButtonText
+                  }
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={[styles.modeButton, styles.effectApplyButton]}
+                style={[
+                  styles.effectActionButton,
+                  styles.effectApplyButton,
+                ]}
                 onPress={handleApplyEffect}
                 disabled={isApplyingEffect}
               >
-                {isApplyingEffect ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.modeButtonText}>Primijeni</Text>}
+                {isApplyingEffect ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#ffffff"
+                  />
+                ) : (
+                  <Text
+                    style={
+                      styles.effectActionButtonText
+                    }
+                  >
+                    Confirm
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         )}
+    </ScrollView>
+  </SafeAreaView>
+);
 
-        <TouchableOpacity style={styles.playAllButton} onPress={handleToggleAll} disabled={tracks.length === 0}>
-          <Text style={styles.playAllButtonText}>
-            {isPlayingAll ? '⏸ Pauziraj sve' : '▶ Pokreni sve'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.stopAllButton} onPress={handleStopAll} disabled={tracks.length === 0}>
-          <Text style={styles.stopAllButtonText}>⏹ Stopiraj sve</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.addButton} onPress={pickAndAddTrack} disabled={isAddingTrack}>
-          {isAddingTrack ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <Text style={styles.addButtonText}>+ Dodaj pjesmu</Text>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
-  );
 }
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f7fb', paddingTop: 28, paddingHorizontal: 5 },
-  waveformStage: { backgroundColor: 'transparent', paddingVertical: 8 },
-  meta: { marginTop: 14, marginHorizontal: 15, color: '#46607c', fontSize: 13 },
-  modeControls: {
-    marginTop: 10,
-    marginHorizontal: 15,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modeButton: {
+  container: {
     flex: 1,
-    backgroundColor: '#334155',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#f4f7fb',
+    paddingTop: 0,
+    paddingHorizontal: 5,
   },
-  splitButton: {
-    backgroundColor: '#7c2d12',
+
+  waveformStage: {
+    backgroundColor: 'transparent',
+    paddingVertical: 8,
   },
-  modeButtonActive: {
-    backgroundColor: '#0f766e',
-  },
-  modeButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
-  playAllButton: {
-    marginTop: 8,
+
+  meta: {
+    marginTop: 14,
     marginHorizontal: 15,
-    backgroundColor: '#17324d',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: '#46607c',
+    fontSize: 13,
   },
-  playAllButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
-  zoomControls: {
-    marginLeft: 10,
+
+  topControls: {
+    height: 44,
+    paddingHorizontal: 10,
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  zoomButton: {
-    backgroundColor: '#0f766e',
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+
+  addTrackButton: {
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  zoomButtonDisabled: { backgroundColor: '#94a3b8' },
-  stopAllButton: {
+
+  timeDisplayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  timeDisplay: {
+    color: '#263548',
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.2,
+  },
+
+  timeSeparator: {
+    color: '#94a3b8',
+    fontWeight: '400',
+  },
+
+  zoomControls: {
+    marginLeft: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  zoomIconButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  editorToolbar: {
     marginTop: 10,
     marginHorizontal: 15,
-    backgroundColor: '#b42318',
-    borderRadius: 10,
-    paddingVertical: 12,
+    minHeight: 58,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e3e8ef',
+
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.06,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+
+  transportControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+
+  transportButton: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stopAllButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
-  addButton: {
-    marginTop: 20,
-    marginHorizontal: 15,
-    backgroundColor: '#1561bd',
+
+  playButton: {
+    width: 43,
+    height: 43,
+    borderRadius: 22,
+    backgroundColor: '#059669',
+  },
+
+  stopButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#e2e8f0',
+  },
+
+  toolDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#e2e8f0',
+    marginHorizontal: 12,
+  },
+
+  editTools: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+
+  toolButton: {
+    width: 40,
+    height: 40,
     borderRadius: 10,
-    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
-  addButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 15 },
+
+  toolButtonActive: {
+    backgroundColor: '#e8f1fb',
+  },
+
+  toolButtonDisabled: {
+    opacity: 0.55,
+  },
+
   selectionHighlight: {
     position: 'absolute',
     top: 0,
@@ -1114,6 +1819,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(15, 118, 110, 0.55)',
     borderWidth: 1,
   },
+
   selectionHandle: {
     position: 'absolute',
     top: 0,
@@ -1121,68 +1827,196 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   selectionHandleGrip: {
     width: 5,
     height: '72%',
     borderRadius: 3,
     backgroundColor: '#0f766e',
   },
+
   selectionGestureLayer: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
   },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f4f7fb', padding: 20 },
-  loadingText: { marginTop: 12, color: '#17324d', fontSize: 15 },
-  errorText: { color: '#b42318', fontSize: 16, textAlign: 'center' },
-  clearSelectionButton: {
-    backgroundColor: '#7c2d12',
+
+  loadingContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f4f7fb',
+    padding: 20,
   },
-  effectOpenButton: { backgroundColor: '#0f766e', flex: 1 },
+
+  loadingText: {
+    marginTop: 12,
+    color: '#17324d',
+    fontSize: 15,
+  },
+
+  errorText: {
+    color: '#dc2626',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+
   effectPanel: {
-    marginTop: 10,
+    marginTop: 8,
     marginHorizontal: 15,
     backgroundColor: '#ffffff',
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 12,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-  },
-  effectPanelTitle: { fontSize: 14, fontWeight: '700', color: '#17324d', marginBottom: 8 },
-  effectRow: { marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  effectLabel: { width: 125, fontSize: 12, color: '#46607c' },
-  effectSlider: { flex: 1, height: 30 },
-  effectValue: { width: 70, color: '#17324d', fontSize: 12, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  effectButtonsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  effectCancelButton: { backgroundColor: '#334155', flex: 1 },
-  effectApplyButton: { backgroundColor: '#1561bd', flex: 1 },
-  effectTypeRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  effectTypeButton: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#e2e8f0',
-    alignItems: 'center',
-  },
-  effectTypeButtonActive: { backgroundColor: '#1561bd' },
-  effectTypeButtonText: { color: '#17324d', fontWeight: '600', fontSize: 12 },
-  effectSilenceNote: { fontSize: 12, color: '#46607c', marginBottom: 8, fontStyle: 'italic' },
-  timeDisplayContainer: {
-    position: 'absolute',
-    top: 8,
-    right: 10,
-    zIndex: 100,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
+
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
 
-  timeDisplay: {
-    color: '#030303',
+  effectPanelTitle: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: '#17324d',
+    marginBottom: 8,
+  },
+
+  effectRow: {
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  effectLabel: {
+    width: 125,
+    fontSize: 12,
+    color: '#46607c',
+  },
+
+  effectSlider: {
+    flex: 1,
+    height: 30,
+  },
+
+  effectValue: {
+    width: 70,
+    color: '#17324d',
+    fontSize: 12,
+    textAlign: 'right',
     fontVariant: ['tabular-nums'],
   },
 
+  effectButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+
+  effectActionButton: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  effectActionButtonText: {
+    color: '#ffffff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+
+  effectCancelButton: {
+    backgroundColor: '#64748b',
+  },
+
+  effectApplyButton: {
+    backgroundColor: '#1561bd',
+  },
+
+  effectTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+
+  effectTypeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 13,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  pitchEffectTypeButton: {
+    width: 42,
+    paddingHorizontal: 0,
+  },
+
+  effectTypeButtonActive: {
+    backgroundColor: '#e8f1fb',
+    borderWidth: 1,
+    borderColor: '#1561bd',
+  },
+
+  effectTypeButtonText: {
+    color: '#526174',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+
+  graphicEqRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    width: '100%',
+    justifyContent: 'space-between',
+  },
+
+  graphicEqBand: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
+
+  graphicEqGain: {
+    color: '#526174',
+    fontSize: 10,
+    fontVariant: ['tabular-nums'],
+    marginBottom: 4,
+  },
+
+  graphicEqSliderSlot: {
+    width: '100%',
+    height: 142,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  graphicEqSlider: {
+    width: 142,
+    height: 40,
+    transform: [{ rotate: '-90deg' }],
+  },
+
+  graphicEqFrequency: {
+    color: '#526174',
+    fontSize: 10,
+    marginTop: 4,
+  },
+
+  effectSilenceNote: {
+    fontSize: 12,
+    color: '#46607c',
+    marginBottom: 8,
+    fontStyle: 'italic',
+  },
 });

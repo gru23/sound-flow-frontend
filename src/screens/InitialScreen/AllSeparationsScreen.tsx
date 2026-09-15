@@ -4,8 +4,10 @@ import { getAllSeparations } from '../../services/clientService';
 import { getClientId } from '../../utils/clientStorage';
 import { SeparationJob } from '../../models/separations-jobs/SeparationJob';
 import { deleteSeparationById } from '../../utils/separationStorage';
+import { useTheme } from '../../utils/ThemeProvider';
 
 export default function AllSeparationsScreen() {
+  const { colors } = useTheme();
   const [jobs, setJobs] = useState<SeparationJob[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,17 +43,17 @@ export default function AllSeparationsScreen() {
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyText}>No separations yet</Text>
+      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No separations yet</Text>
     </View>
   );
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>All separations</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>All separations</Text>
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
         <FlatList
@@ -63,15 +65,15 @@ export default function AllSeparationsScreen() {
             const finished = item.finishedAt ? new Date(item.finishedAt).toDateString() : '-';
             return (
               <TouchableOpacity 
-                style={styles.item}
+                style={[styles.item, { borderBottomColor: colors.borderColor }]}
                 onPress={() => console.log(item.id)}
               >
                 <View style={styles.info}>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  <Text style={styles.meta}>{finished} • {String(item.option)}</Text>
+                  <Text style={[styles.itemTitle, { color: colors.textPrimary }]}>{item.title}</Text>
+                  <Text style={[styles.meta, { color: colors.textSecondary }]}>{finished} • {String(item.option)}</Text>
                 </View>
                 <TouchableOpacity style={styles.deleteArea} onPress={() => handleDelete(item.id)}>
-                  <Text style={styles.deleteText}>x</Text>
+                  <Text style={[styles.deleteText, { color: colors.error }]}>x</Text>
                 </TouchableOpacity>
               </TouchableOpacity>
             );
@@ -85,14 +87,12 @@ export default function AllSeparationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
     paddingTop: 56,
     paddingHorizontal: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#1f2937',
     marginBottom: 20,
   },
   loadingContainer: {
@@ -111,7 +111,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    color: '#666',
     fontSize: 16,
   },
   item: {
@@ -120,7 +119,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
   },
   info: {
     flex: 1,
@@ -128,11 +126,9 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
   },
   meta: {
     fontSize: 12,
-    color: 'gray',
     marginTop: 4,
   },
   deleteArea: {
@@ -141,7 +137,6 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
   },
   deleteText: {
-    color: '#ff4d4d',
     fontWeight: 'bold',
   },
 });

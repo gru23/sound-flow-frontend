@@ -8,6 +8,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Audio } from 'expo-av'
@@ -19,6 +21,7 @@ import { RootStackParamList } from '../../App'
 import { submitSeparationRequest } from '../utils/pickDocument'
 import { useSeparationWatcherController } from '../utils/SeparationWatcherProvider'
 import { SeparationOption } from '../models/separations-jobs/SeparationOption'
+import { useTheme } from '../utils/ThemeProvider'
 
 type PendingUpload = {
   uri: string
@@ -42,9 +45,11 @@ const BAR_GAP = 2
 
 interface WaveformProps {
   analysisData?: AudioAnalysis
+  colors?: any
 }
 
-function Waveform({ analysisData }: WaveformProps) {
+function Waveform({ analysisData, colors }: WaveformProps) {
+  const themeColors = colors || { bar: '#7c4dff', barSilent: '#444', background: '#1a1a2e' }
   const bars = useMemo(() => {
     const points = analysisData?.dataPoints ?? []
     const slice = points.slice(-MAX_BARS)
@@ -58,9 +63,9 @@ function Waveform({ analysisData }: WaveformProps) {
   }, [analysisData])
 
   return (
-    <View style={waveStyles.container}>
+    <View style={[waveStyles.container, { backgroundColor: themeColors.background }]}>
       {/* centre line */}
-      <View style={waveStyles.centreLine} />
+      <View style={{ position: 'absolute', left: 0, right: 0, top: WAVEFORM_HEIGHT / 2, height: 1, backgroundColor: themeColors.barSilent }} />
 
       <View style={waveStyles.barsRow}>
         {bars.map((bar) => (
@@ -68,15 +73,15 @@ function Waveform({ analysisData }: WaveformProps) {
             key={bar.key}
             style={[
               waveStyles.bar,
-              { height: bar.height },
-              bar.silent && waveStyles.barSilent,
+              { height: bar.height, backgroundColor: themeColors.bar },
+              bar.silent && { backgroundColor: themeColors.barSilent },
             ]}
           />
         ))}
         {/* placeholder bars so the container is never empty */}
         {bars.length === 0 &&
           Array.from({ length: MAX_BARS }).map((_, i) => (
-            <View key={i} style={[waveStyles.bar, { height: 2 }, waveStyles.barSilent]} />
+            <View key={i} style={[waveStyles.bar, { height: 2, backgroundColor: themeColors.barSilent }]} />
           ))}
       </View>
     </View>
@@ -87,6 +92,7 @@ export default function RecorderScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'Recorder'>>()
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>()
   const { setWatchJobId } = useSeparationWatcherController()
+  const { colors } = useTheme()
 
   const {
     startRecording,
@@ -200,25 +206,29 @@ export default function RecorderScreen() {
   }, [])
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>Recorder</Text>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>Recorder</Text>
 
         {/* Timer */}
-        <Text style={styles.timer}>{formatDuration(displayDuration)}</Text>
+        <Text style={[styles.timer, { color: colors.textSecondary }]}>{formatDuration(displayDuration)}</Text>
 
         {/* Real-time waveform */}
-        <Waveform analysisData={analysisData} />
+        <Waveform analysisData={analysisData} colors={{ 
+          background: colors.surfaceBackground, 
+          bar: colors.primary, 
+          barSilent: colors.borderColor 
+        }} />
 
         {/* Buttons */}
         <View style={styles.buttonRow}>
           {!isRecording ? (
-            <TouchableOpacity style={[styles.btn, styles.btnRecord]} onPress={handleStart}>
+            <TouchableOpacity style={[styles.btn, { backgroundColor: colors.error }]} onPress={handleStart}>
               <Text style={styles.btnText}>● REC</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[styles.btn, isPaused ? styles.btnResume : styles.btnPause]}
+              style={[styles.btn, { backgroundColor: isPaused ? colors.success : colors.warning }]}
               onPress={handlePauseResume}
             >
               <Text style={styles.btnText}>{isPaused ? '▶ Resume' : '⏸ Pause'}</Text>
@@ -226,7 +236,7 @@ export default function RecorderScreen() {
           )}
 
           <TouchableOpacity
-            style={[styles.btn, styles.btnStop, !isRecording && styles.btnDisabled]}
+            style={[styles.btn, { backgroundColor: colors.textSecondary }, !isRecording && styles.btnDisabled]}
             onPress={handleStop}
             disabled={!isRecording}
           >
@@ -235,13 +245,13 @@ export default function RecorderScreen() {
         </View>
 
         {/* Status */}
-        <Text style={styles.status}>
+        <Text style={[styles.status, { color: colors.textTertiary }]}>
           {isRecording ? (isPaused ? 'Paused' : 'Recording…') : 'Idle'}
         </Text>
 
         {/* Saved file */}
         {recordingUri ? (
-          <Text style={styles.savedUri} numberOfLines={3}>
+          <Text style={[styles.savedUri, { color: colors.primary }]} numberOfLines={3}>
             Saved: {recordingUri}
           </Text>
         ) : null}
@@ -253,30 +263,96 @@ export default function RecorderScreen() {
         animationType="fade"
         onRequestClose={handleCancelUpload}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Name the recording</Text>
-            <Text style={styles.modalDescription}>
-              Default name is prefilled. You can keep it or type your own before sending to source separation.
-            </Text>
-            <TextInput
-              value={recordingName}
-              onChangeText={setRecordingName}
-              placeholder="rec_123456"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.modalInput}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalButton, styles.modalCancelButton]} onPress={handleCancelUpload}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.modalSaveButton]} onPress={handleConfirmUpload}>
-                <Text style={styles.modalSaveText}>Upload</Text>
-              </TouchableOpacity>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboardContainer}
+          behavior={Platform.OS === 'android' ? 'height' : undefined}
+        >
+          <View
+            style={[
+              styles.modalOverlay,
+              { backgroundColor: colors.overlay },
+            ]}
+          >
+            <View
+              style={[
+                styles.modalCard,
+                { backgroundColor: colors.modalBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: colors.textPrimary },
+                ]}
+              >
+                Name the recording
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalDescription,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Default name is prefilled. You can keep it or type your own
+                before sending to source separation.
+              </Text>
+
+              <TextInput
+                value={recordingName}
+                onChangeText={setRecordingName}
+                placeholder="rec_123456"
+                placeholderTextColor={colors.textTertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[
+                  styles.modalInput,
+                  {
+                    borderColor: colors.borderColor,
+                    backgroundColor: colors.surfaceBackground,
+                    color: colors.textPrimary,
+                  },
+                ]}
+              />
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: colors.menuItemBackground },
+                  ]}
+                  onPress={handleCancelUpload}
+                >
+                  <Text
+                    style={[
+                      styles.modalCancelText,
+                      { color: colors.textPrimary },
+                    ]}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: colors.success },
+                  ]}
+                  onPress={handleConfirmUpload}
+                >
+                  <Text
+                    style={[
+                      styles.modalSaveText,
+                      { color: '#fff' },
+                    ]}
+                  >
+                    Upload
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   )
@@ -286,19 +362,10 @@ const waveStyles = StyleSheet.create({
   container: {
     width: '100%',
     height: WAVEFORM_HEIGHT,
-    backgroundColor: '#1a1a2e',
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: 32,
     justifyContent: 'center',
-  },
-  centreLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: WAVEFORM_HEIGHT / 2,
-    height: 1,
-    backgroundColor: '#333',
   },
   barsRow: {
     flexDirection: 'row',
@@ -308,18 +375,13 @@ const waveStyles = StyleSheet.create({
   },
   bar: {
     width: BAR_WIDTH,
-    backgroundColor: '#7c4dff',
     borderRadius: 2,
-  },
-  barSilent: {
-    backgroundColor: '#444',
   },
 })
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
   },
   scroll: {
     alignItems: 'center',
@@ -329,13 +391,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 26,
     fontWeight: '700',
-    color: '#fff',
     marginBottom: 16,
   },
   timer: {
     fontSize: 48,
     fontWeight: '300',
-    color: '#e0e0e0',
     letterSpacing: 4,
     marginBottom: 24,
   },
@@ -351,18 +411,6 @@ const styles = StyleSheet.create({
     minWidth: 120,
     alignItems: 'center',
   },
-  btnRecord: {
-    backgroundColor: '#e53935',
-  },
-  btnPause: {
-    backgroundColor: '#fb8c00',
-  },
-  btnResume: {
-    backgroundColor: '#43a047',
-  },
-  btnStop: {
-    backgroundColor: '#546e7a',
-  },
   btnDisabled: {
     opacity: 0.35,
   },
@@ -372,19 +420,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   status: {
-    color: '#9e9e9e',
     fontSize: 14,
     marginBottom: 12,
   },
   savedUri: {
-    color: '#90caf9',
     fontSize: 12,
     textAlign: 'center',
     marginTop: 8,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -392,27 +437,21 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 420,
-    backgroundColor: '#1e1e1e',
     borderRadius: 18,
     padding: 20,
   },
   modalTitle: {
-    color: '#fff',
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 8,
   },
   modalDescription: {
-    color: '#bdbdbd',
     fontSize: 14,
     marginBottom: 14,
     lineHeight: 20,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#3c3c3c',
-    backgroundColor: '#121212',
-    color: '#fff',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -431,18 +470,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
-  modalCancelButton: {
-    backgroundColor: '#2f2f2f',
-  },
-  modalSaveButton: {
-    backgroundColor: '#1db954',
-  },
   modalCancelText: {
-    color: '#fff',
     fontWeight: '600',
   },
   modalSaveText: {
-    color: '#08130c',
     fontWeight: '700',
   },
+  modalKeyboardContainer: {
+    flex: 1,
+  },
+
 })

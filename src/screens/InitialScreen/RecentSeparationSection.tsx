@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SeparationJob } from "../../models/separations-jobs/SeparationJob";
 import { deleteSeparationById } from "../../utils/separationStorage";
+import { useTheme } from "../../utils/ThemeProvider";
 
 type RootStackLikeParamList = {
   SourceSeparation: { id: string };
@@ -15,6 +16,7 @@ type Props = {
 }
 
 export default function RecentSeparationSection({ jobs, onRefresh, onViewAllPress }: Props) {
+  const { colors } = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackLikeParamList, 'SourceSeparation'>>();
   const handleDelete = async (id: string) => {
     await deleteSeparationById(id);
@@ -23,14 +25,14 @@ export default function RecentSeparationSection({ jobs, onRefresh, onViewAllPres
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
-    <Text style={styles.emptyText}>No recent separations</Text>
+    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No recent separations</Text>
     </View>
   );
 
   return(
     <View style={styles.container}>
       <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Recent separations</Text>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Recent separations</Text>
       </View>
       <FlatList 
       data={jobs}
@@ -41,15 +43,15 @@ export default function RecentSeparationSection({ jobs, onRefresh, onViewAllPres
         const finished = item.finishedAt ? new Date(item.finishedAt).toDateString() : '-';
         return (
           <TouchableOpacity 
-            style={styles.item}
+            style={[styles.item, { borderBottomColor: colors.borderColor }]}
             onPress={() => navigation.navigate('SourceSeparation', { id: item.id })}
           >
               <View style={styles.info}>
-                <Text style={styles.title}>{item.title}</Text>
-                <Text style={styles.meta}>{finished} • {String(item.option)}</Text>
+                <Text style={[styles.title, { color: colors.textPrimary }]}>{item.title}</Text>
+                <Text style={[styles.meta, { color: colors.textSecondary }]}>{finished} • {String(item.option)}</Text>
               </View>
               <TouchableOpacity style={styles.deleteArea} onPress={() => handleDelete(item.id)} >
-                <Text style={styles.deleteText}>x</Text>
+                <Text style={[styles.deleteText, { color: colors.error }]}>x</Text>
               </TouchableOpacity>
           </TouchableOpacity>
         );
@@ -61,7 +63,7 @@ export default function RecentSeparationSection({ jobs, onRefresh, onViewAllPres
         onPress={onViewAllPress}
         disabled={!onViewAllPress}
       >
-        <Text style={[styles.viewAllText, !onViewAllPress && styles.viewAllTextDisabled]}>View All</Text>
+        <Text style={[styles.viewAllText, !onViewAllPress && styles.viewAllTextDisabled, { color: colors.primary }]}>View All</Text>
       </TouchableOpacity>
     </View>
   );
@@ -101,7 +103,6 @@ const styles = StyleSheet.create({
     paddingRight: 15,
   },
   deleteText: {
-    color: "#ff4d4d",
     fontWeight: "bold",
   },
   container: {
@@ -114,7 +115,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    color: '#666',
+    // Color applied through inline style
   },
   viewAllContainer: {
     alignItems: "center",
@@ -122,7 +123,6 @@ const styles = StyleSheet.create({
   viewAllText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     textAlign: 'center',
   },
   viewAllTextDisabled: {

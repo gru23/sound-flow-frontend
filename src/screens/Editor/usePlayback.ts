@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Audio, AVPlaybackStatus } from 'expo-av';
 
 export type PlayableTrack = { id: string; uri: string };
+export type PlaybackLoop = { start: number; end: number };
 
 // Jedan Audio.Sound po tracku (mapiran preko id-a), deljen između
 // individualnog preview dugmeta i "play all" funkcije - ko god prvi
@@ -17,6 +18,7 @@ export function usePlayback() {
   const maxDurationRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickAnchorRef = useRef({ wallClock: 0, position: 0 });
+  const loopRef = useRef<PlaybackLoop | null>(null);
 
   useEffect(() => {
     Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
@@ -45,7 +47,10 @@ export function usePlayback() {
       const elapsed = (Date.now() - tickAnchorRef.current.wallClock) / 1000;
       const next = tickAnchorRef.current.position + elapsed;
 
-      if (next >= maxDurationRef.current) {
+      const loop = loopRef.current;
+      if (loop && next >= loop.end) {
+        void restartAllAt(loop.start);
+      } else if (next >= maxDurationRef.current) {
         positionRef.current = maxDurationRef.current;
         setPositionSeconds(maxDurationRef.current);
         void pauseAll();
@@ -54,6 +59,26 @@ export function usePlayback() {
         setPositionSeconds(next);
       }
     }, 120);
+  }
+
+  async function restartAllAt(nextPositionSeconds: number) {
+    stopTimer();
+    positionRef.current = nextPositionSeconds;
+    setPositionSeconds(nextPositionSeconds);
+    const seekMs = Math.round(nextPositionSeconds * 1000);
+
+    await Promise.all(
+      Array.from(soundsRef.current.values()).map(async (sound) => {
+        const status = await sound.getStatusAsync();
+        if (!status.isLoaded) return;
+        const clampedMs = Math.min(seekMs, status.durationMillis ?? seekMs);
+        await sound.setPositionAsync(clampedMs);
+        await sound.playAsync();
+      })
+    );
+
+    setIsPlayingAll(true);
+    startTimer();
   }
 
   const markStopped = useCallback((id: string) => {
@@ -182,6 +207,10 @@ export function usePlayback() {
     await Promise.all(Array.from(soundsRef.current.values()).map((s) => s.stopAsync().catch(() => {})));
   }, []);
 
+  const setLoopRange = useCallback((loop: PlaybackLoop | null) => {
+    loopRef.current = loop;
+  }, []);
+
   const toggleAll = useCallback(
     async (tracksToPlay: PlayableTrack[], maxDurationSeconds: number) => {
       if (isPlayingAll) {
@@ -227,5 +256,17 @@ export function usePlayback() {
     });
   }, []);
 
-  return { togglePlayback, isPlaying, toggleAll, stopAll, seekAll, isPlayingAll, positionSeconds, setTrackMuted, setTrackVolume, unloadTrack };
+  return {
+    togglePlayback,
+    isPlaying,
+    toggleAll,
+    stopAll,
+    seekAll,
+    setLoopRange,
+    isPlayingAll,
+    positionSeconds,
+    setTrackMuted,
+    setTrackVolume,
+    unloadTrack,
+  };
 }

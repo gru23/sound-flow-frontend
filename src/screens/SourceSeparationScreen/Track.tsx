@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Sound } from 'expo-av/build/Audio';
 import { Waveform, type IWaveformRef } from '@simform_solutions/react-native-audio-waveform';
 import Slider from '@react-native-community/slider';
+import { useTheme } from '../../utils/ThemeProvider';
 
 type TrackProps = {
   name: string;
@@ -17,7 +18,20 @@ type TrackProps = {
   currentPosition: number;
 };
 
-export default function Track({ name, sound, index, volume, audioPath, onVolumeChange, onWaveformLoadStateChange, icon, muteIcon, currentPosition }: TrackProps) {
+export default function Track({
+  name,
+  sound,
+  index,
+  volume,
+  audioPath,
+  onVolumeChange,
+  onWaveformLoadStateChange,
+  icon,
+  muteIcon,
+  currentPosition,
+}: TrackProps) {
+  const { colors } = useTheme();
+
   const [volumeValue, setVolumeValue] = useState<number>(volume);
   const [muteButton, setMuteButton] = useState<string>("Mute");
   const [sliderValue, setSliderValue] = useState<number>(volume * 100);
@@ -34,16 +48,19 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
   useEffect(() => {
     const getDuration = async () => {
       const status = await sound.getStatusAsync();
+
       if (status.isLoaded) {
         setDuration(status.durationMillis || 0);
       }
     };
+
     getDuration();
   }, [sound]);
 
   useEffect(() => {
     if (duration > 0) {
       const percentage = (currentPosition / duration) * 100;
+
       Animated.timing(animatedProgressRef, {
         toValue: percentage,
         duration: 50,
@@ -53,17 +70,17 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
   }, [currentPosition, duration]);
 
   const setVolume = async (value: number) => {
-    if(value === 0)
+    if (value === 0)
       muteVolume();
     else {
       lastVolumeRef.current = value;
       setVolumeValue(value);
       setMuteButton("Mute");
-    }   
+    }
   };
 
   const muteVolume = async () => {
-    if("Mute" === muteButton) {
+    if ("Mute" === muteButton) {
       setMuteButton("Unmute");
       lastVolumeRef.current = volumeValue;
       setVolumeValue(0);
@@ -76,39 +93,63 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
     }
   }
 
-   const handleSliderChange = (val: number) => {
+  const handleSliderChange = (val: number) => {
     setSliderValue(val);
     const normalized = val / 100;
     setVolume(normalized);
   };
 
   return (
-    <View style={styles.track}>
-      <Text style={styles.trackName}>{name}</Text>
-      {/* <Text style={styles.volumeText}>Vol: {Math.round(volumeValue * 100)}%</Text> */}
+    <View
+      style={[
+        styles.track,
+        {
+          backgroundColor: colors.surfaceBackground,
+          borderColor: colors.borderColor,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.trackName,
+          {
+            color: colors.textPrimary,
+          },
+        ]}
+      >
+        {name}
+      </Text>
 
       <View style={styles.inputRow}>
         <TouchableOpacity onPress={() => muteVolume()}>
-          <Image 
-          source={volumeValue === 0 ? muteIcon : icon} 
-          // style={{ width: 36, height: 36, marginRight: 10 }} 
-          style={{ marginRight: 0 }} //original icon size
-        />
+          <Image
+            source={volumeValue === 0 ? muteIcon : icon}
+            style={{ marginRight: 0 }}
+          />
         </TouchableOpacity>
-        
+
         <Slider
-          style={ styles.volumeSlider }
+          style={styles.volumeSlider}
           minimumValue={0}
           maximumValue={100}
           value={sliderValue}
-          onValueChange={handleSliderChange}  // makes a problem for lastVolumeRef because calls handleSliderChange many times
-          //onSlidingComplete={handleSliderChange}  // no problem with lastVolumeRef, but does not change volume during a slide, just on release
-          minimumTrackTintColor="#1DB954"
-          maximumTrackTintColor="#ccc"
-          thumbTintColor='red'
+          onValueChange={handleSliderChange}
+          minimumTrackTintColor={colors.primary}
+          maximumTrackTintColor={colors.borderColor}
+          thumbTintColor={colors.primary}
         />
       </View>
-      <Text style={styles.volumeText}>Vol: {Math.round(volumeValue * 100)}%</Text>
+
+      <Text
+        style={[
+          styles.volumeText,
+          {
+            color: colors.textSecondary,
+          },
+        ]}
+      >
+        Vol: {Math.round(volumeValue * 100)}%
+      </Text>
 
       <View style={styles.waveformWrapper}>
         <Waveform
@@ -117,8 +158,8 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
           path={audioPath}
           candleWidth={3}
           candleSpace={1}
-          waveColor="#fff"
-          scrubColor="#fff"
+          waveColor={colors.textSecondary}
+          scrubColor={colors.textSecondary}
           containerStyle={styles.waveformContainer}
           onChangeWaveformLoadState={(state) => {
             onWaveformLoadStateChange?.(index, state);
@@ -128,11 +169,13 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
             onWaveformLoadStateChange?.(index, false);
           }}
         />
+
         {duration > 0 && (
           <Animated.View
             style={[
               styles.progressIndicator,
               {
+                backgroundColor: colors.primary,
                 left: animatedProgressRef.interpolate({
                   inputRange: [0, 100],
                   outputRange: ['0%', '100%'],
@@ -148,45 +191,48 @@ export default function Track({ name, sound, index, volume, audioPath, onVolumeC
 
 const styles = StyleSheet.create({
   track: {
-    backgroundColor: '#4784b9d4',
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 5,
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 8,
+    borderWidth: 1,
   },
+
   trackName: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: '700',
   },
-   volumeSlider: {
-    flex:1, 
-    height: 10, 
+
+  volumeSlider: {
+    flex: 1,
+    height: 10,
     marginHorizontal: 10,
   },
+
   volumeText: {
-    color: '#aaa',
-    // marginVertical: 0,
+    fontSize: 13,
+    fontWeight: '500',
   },
+
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // marginVertical: 2,
   },
+
   waveformContainer: {
     height: 80,
     width: '100%',
-    // marginTop: 10,
   },
+
   waveformWrapper: {
     position: 'relative',
     marginTop: -10,
   },
+
   progressIndicator: {
     position: 'absolute',
     top: 0,
     width: 2,
     height: 40,
-    backgroundColor: '#FF1744',
     zIndex: 10,
     marginTop: 20,
   },

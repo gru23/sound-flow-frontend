@@ -30,6 +30,7 @@ import { SeparationWatcherProvider } from './src/utils/SeparationWatcherProvider
 import { SEPARATIONS_PATH } from './src/utils/separationStorage';
 import SettingsScreen from './src/screens/DrawerScreen/SettingsScreen';
 import { SeparationOption } from './src/models/separations-jobs/SeparationOption';
+import { ThemeProvider, useTheme } from './src/utils/ThemeProvider';
 // import { createDrawerNavigator } from '@react-navigation/drawer';
 // import { DrawerNavigator } from './src/navigation/DrawerNavigator';
 
@@ -245,6 +246,60 @@ const toastConfig: ToastConfig = {
   ),
 };
 
+function AppContent() {
+  const { isDark, colors } = useTheme();
+
+  return (
+    <>
+      <MenuProvider>
+        <SeparationWatcherProvider>
+          <NavigationContainer>
+            <Stack.Navigator>
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Filters" component={FiltersScreen} />
+              <Stack.Screen name="Visual" component={VisualScreen} />
+              <Stack.Screen
+                name="SkiaVisual"
+                component={SkiaVisualScreen}
+                initialParams={{ path: "test2" }}
+              />
+              <Stack.Screen
+                name="EditorScreen"
+                component={EditorScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen
+                name="SourceSeparation"
+                component={SourceSeparationPlayerScreen}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen name="Picker" component={PickerScreen} />
+              <Stack.Screen name="Recorder" component={RecorderScreen} />
+              <Stack.Screen name="Initial" component={InitialScreen} options={{ headerShown: false }} />
+              <Stack.Screen
+                name="AllSeparations"
+                component={AllSeparationsScreen}
+              />
+              <Stack.Screen
+                name="Registration"
+                component={RegistrationScreen}
+              />
+              <Stack.Screen name="Account" component={AccountScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </SeparationWatcherProvider>
+      </MenuProvider>
+
+      <StatusBar style={isDark ? "light" : "dark"} />
+
+      <Toast config={toastConfig} />
+    </>
+  );
+}
+
+
 export default function App() {
   const [isAuthResolved, setIsAuthResolved] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -254,10 +309,12 @@ export default function App() {
 
     const resolveAuthState = async () => {
       try {
-        // ovaj validSession je bio prije moje logike za prijavu, is'o je preko google-a, oauth2
-        // const validSession = await isStoredGoogleSessionValid();
         const validSession = await checkJwtValid();
-        const ispis = validSession ? "PRIJAVLJEN" : "NIJE PRIJAVLJEN";
+
+        const ispis = validSession
+          ? "PRIJAVLJEN"
+          : "NIJE PRIJAVLJEN";
+
         console.log(ispis);
 
         if (mounted) {
@@ -281,43 +338,20 @@ export default function App() {
     return (
       <View style={styles.authLoaderContainer}>
         <ActivityIndicator size="large" />
-        <Text style={styles.authLoaderText}>Provjera prijave...</Text>
+        <Text style={styles.authLoaderText}>
+          Provjera prijave...
+        </Text>
       </View>
     );
   }
-  // ovo mozes na kraju staviti. Izabacio sam sada jer nemas stelice za vracanje na 
-  // onu initial stranu ako nisi prijavljen. Ovako ostavi za razvoj
-  //<Stack.Navigator initialRouteName={isAuthenticated ? 'Initial' : 'Login'}>
+
   return (
-    <>
-      <MenuProvider>
-        <SeparationWatcherProvider>
-          <NavigationContainer>
-            <Stack.Navigator>
-              <Stack.Screen name='Home' component={HomeScreen}/>
-              <Stack.Screen name='Login' component={LoginScreen} />
-              <Stack.Screen name='Filters' component={FiltersScreen} />
-              <Stack.Screen name='Visual' component={VisualScreen} />
-              <Stack.Screen name='SkiaVisual' component={SkiaVisualScreen} initialParams={{ path: 'test2' }} />
-              <Stack.Screen name='EditorScreen' component={EditorScreen} options={{ headerShown: false }} />
-              <Stack.Screen name='SourceSeparation' component={SourceSeparationPlayerScreen} options={{ headerShown: false }} />
-              <Stack.Screen name='Picker' component={PickerScreen} />
-              <Stack.Screen name='Recorder' component={RecorderScreen} />
-              {/* <Stack.Screen name='Initial' component={InitialNavigator} /> */}
-              <Stack.Screen name='Initial' component={InitialScreen} />
-              <Stack.Screen name='AllSeparations' component={AllSeparationsScreen} />
-              <Stack.Screen name='Registration' component={RegistrationScreen} />
-              <Stack.Screen name='Account' component={AccountScreen} />
-              {/* <Stack.Screen name='Initial' component={DrawerNavigator} options={{headerShown: false}} /> */}
-              <Stack.Screen name='Settings' component={SettingsScreen} />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </SeparationWatcherProvider>
-      </MenuProvider>
-      <Toast config={toastConfig} />
-    </>
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {

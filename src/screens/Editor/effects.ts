@@ -14,18 +14,28 @@ export type SelectionEffect =
   | 'fadeIn'
   | 'fadeOut'
   | 'tempo'
+  | 'pitch'
   | 'reverb'
   | 'equalizer'
   | 'bass'
-  | 'treble';
+  | 'treble'
+  | 'phaser'
+  | 'distortion';
 
 export type SelectionEffectParams = {
   amount?: number;
   duration?: number;
   tempo?: number;
+  pitch?: number;
   frequency?: number;
   gain?: number;
   width?: number;
+  equalizerBands?: Array<{ frequency: number; gain: number }>;
+  phaserDepth?: number;
+  phaserDecay?: number;
+  phaserSpeed?: number;
+  phaserDelay?: number;
+  distortionDrive?: number;
 };
 
 function getSelectionFilter(effect: SelectionEffect, params: SelectionEffectParams, duration: number): string {
@@ -40,14 +50,36 @@ function getSelectionFilter(effect: SelectionEffect, params: SelectionEffectPara
       return `afade=t=out:st=${Math.max(0, duration - (params.duration ?? 1)).toFixed(2)}:d=${Math.min(params.duration ?? 1, duration).toFixed(2)}`;
     case 'tempo':
       return `atempo=${(params.tempo ?? 1).toFixed(2)}`;
+    case 'pitch': {
+      const semitones = params.pitch ?? 0;
+      const ratio = Math.pow(2, semitones / 12);
+      return `asetrate=44100*${ratio.toFixed(6)},aresample=44100,atempo=${(1 / ratio).toFixed(6)}`;
+    }
     case 'reverb':
       return `afir=dry=10:wet=${(params.amount ?? 1).toFixed(2)}`;
     case 'equalizer':
-      return `anequalizer=f=${Math.round(params.frequency ?? 1000)}:width_type=o:width=1:g=${(params.gain ?? 0).toFixed(1)}`;
+      return `anequalizer=params='${(
+        params.equalizerBands ?? [{ frequency: params.frequency ?? 1000, gain: params.gain ?? 0 }]
+      )
+        .map(
+          (band) => {
+            const frequency = Math.round(band.frequency);
+            const width = Math.max(1, Math.round(frequency * 0.7));
+            return `c0 f=${frequency} w=${width} g=${band.gain.toFixed(1)}`;
+          }
+        )
+        .join('|')}'`;
     case 'bass':
       return `bass=g=${(params.gain ?? 0).toFixed(1)}:f=${Math.round(params.frequency ?? 100)}`;
     case 'treble':
       return `treble=g=${(params.gain ?? 0).toFixed(1)}:f=${Math.round(params.frequency ?? 3000)}`;
+    case 'phaser':
+      return `aphaser=in_gain=0.8:out_gain=0.8:delay=${(params.phaserDelay ?? 2).toFixed(2)}:decay=${(params.phaserDecay ?? 0.4).toFixed(2)}:speed=${(params.phaserSpeed ?? 0.5).toFixed(2)}:type=s`;
+    case 'distortion': {
+      const drive = Math.max(1, params.distortionDrive ?? 2);
+      return `volume=${drive.toFixed(2)},asoftclip=type=tanh:threshold=0.8`;
+  }
+
     default:
       return 'anull';
   }

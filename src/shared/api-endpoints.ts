@@ -1,5 +1,6 @@
 // export const API_BASE_URL = 'http://10.99.150.137:8080';//'http://localhost:8080';
 export const API_BASE_URL = 'http://192.168.100.25:8080';
+// export const API_BASE_URL = 'http://192.168.1.71:8080';
 
 const API_AUTH_BASE = `${API_BASE_URL}/auth`;
 const API_CLIENT_BASE = `${API_BASE_URL}/clients`;
