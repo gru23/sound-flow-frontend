@@ -4,6 +4,8 @@ Sound Flow is a cross-platform React Native application for working with digital
 
 The project uses Expo with native prebuild support. This gives the application access to Expo modules while still allowing native dependencies such as FFmpeg Kit and Skia to be compiled into the Android application.
 
+The official FFmpegKit repository has been retired and archived, and its prebuilt binaries are no longer available for download. Therefore, the required FFmpeg dependencies are included locally in the android/app/libs folder.
+
 ## Features
 
 - Import audio files through the native document picker.
